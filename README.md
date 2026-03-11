@@ -80,6 +80,14 @@ See [docs/api.md](docs/api.md) for all endpoints, parameters, and response forma
 
 Use the model directly from Python (no server required):
 
+> **Thread safety:** A single `ChatterboxTurboTTS` instance must not be used from multiple
+> threads concurrently. If you need concurrent synthesis, create one model instance per
+> thread, or serialise all `generate()` calls behind a `threading.Lock`. On a single GPU
+> with limited VRAM, serial single-instance use is strongly recommended.
+>
+> Pipeline callers using a direct (in-process) backend must run all `generate()` calls
+> serially — do not share one model instance across a `ThreadPoolExecutor`.
+
 ```python
 import soundfile as sf
 from chatterbox.tts_turbo import ChatterboxTurboTTS
