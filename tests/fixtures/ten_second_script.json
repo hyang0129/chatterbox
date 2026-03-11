@@ -1,0 +1,7 @@
+{
+  "text": "Welcome to Chatterbox Turbo. [chuckle] This is a quick demonstration of natural, high-quality text to speech synthesis. We hope you enjoy the result.",
+  "temperature": 0.8,
+  "top_p": 0.95,
+  "top_k": 1000,
+  "repetition_penalty": 1.2
+}

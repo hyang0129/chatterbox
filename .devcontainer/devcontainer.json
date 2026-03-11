@@ -11,7 +11,7 @@
   "mounts": [
     "source=chatterbox-hf-cache,target=/home/vscode/.cache/huggingface,type=volume"
   ],
-  "forwardPorts": [7860],
+  "forwardPorts": [8000],
   "initializeCommand": ".devcontainer\\initialize.cmd",
   "postCreateCommand": ".devcontainer/post-create.sh",
   "postStartCommand": "pip install -e '.[dev]'",

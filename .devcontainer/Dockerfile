@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
 
 ARG PYTHON_VERSION=3.11
 ARG DEBIAN_FRONTEND=noninteractive
