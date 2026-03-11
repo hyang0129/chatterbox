@@ -1,0 +1,30 @@
+{
+  "name": "Chatterbox TTS",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "runArgs": [
+    "--gpus", "all",
+    "--shm-size", "8g"
+  ],
+  "mounts": [
+    "source=chatterbox-hf-cache,target=/home/vscode/.cache/huggingface,type=volume"
+  ],
+  "forwardPorts": [7860],
+  "postStartCommand": "pip install -e '.[dev]'",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "anthropic.claude-code"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/bin/python3",
+        "python.analysis.typeCheckingMode": "basic"
+      }
+    }
+  }
+}

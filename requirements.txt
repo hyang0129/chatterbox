@@ -1,0 +1,5 @@
+# Core TTS
+chatterbox-tts>=0.1.6
+
+# Dev
+ruff>=0.9.0
