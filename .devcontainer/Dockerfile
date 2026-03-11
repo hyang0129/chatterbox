@@ -4,7 +4,9 @@ ARG PYTHON_VERSION=3.11
 ARG DEBIAN_FRONTEND=noninteractive
 
 # System dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     curl \
     git \
@@ -15,8 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get install -y --no-install-recommends \
     python${PYTHON_VERSION} \
     python${PYTHON_VERSION}-venv \
-    python${PYTHON_VERSION}-dev \
-    && rm -rf /var/lib/apt/lists/*
+    python${PYTHON_VERSION}-dev
 
 # Set python3.11 as default
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1 \

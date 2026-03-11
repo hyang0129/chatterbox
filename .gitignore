@@ -7,3 +7,4 @@ build/
 *.wav
 *.mp3
 .ruff_cache/
+.devcontainer/.gituser.tmp

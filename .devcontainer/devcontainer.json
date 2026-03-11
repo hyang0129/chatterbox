@@ -12,7 +12,10 @@
     "source=chatterbox-hf-cache,target=/home/vscode/.cache/huggingface,type=volume"
   ],
   "forwardPorts": [7860],
+  "initializeCommand": ".devcontainer\\initialize.cmd",
+  "postCreateCommand": ".devcontainer/post-create.sh",
   "postStartCommand": "pip install -e '.[dev]'",
+  "remoteUser": "vscode",
   "customizations": {
     "vscode": {
       "extensions": [
