@@ -31,7 +31,21 @@ Synthesize speech from text. Returns a WAV audio file.
 
 **Response**
 
-`Content-Type: audio/wav` — mono, 24 kHz, 32-bit float PCM.
+`Content-Type: audio/wav` — mono, PCM 16-bit, **24000 Hz** (the model's native sample rate).
+
+> **Sample rate:** The output is always at 24000 Hz (`model.sr`). If your downstream tool
+> expects a different rate (e.g. 44100 Hz for broadcast, 22050 Hz for Rhubarb lip-sync),
+> resample with ffmpeg:
+>
+>     ffmpeg -i output.wav -ar 22050 output_22050.wav
+
+**Response headers**
+
+| Header | Example | Description |
+|--------|---------|-------------|
+| `X-Audio-Duration-S` | `4.23` | Audio duration in seconds (two decimal places) |
+| `X-Sample-Rate` | `24000` | Sample rate of the returned WAV |
+| `X-Audio-Frames` | `101520` | Total PCM frame count |
 
 **Example**
 
@@ -78,7 +92,8 @@ Accepts `multipart/form-data`.
 
 **Response**
 
-`Content-Type: audio/wav` — mono, 24 kHz, 32-bit float PCM.
+`Content-Type: audio/wav` — mono, PCM 16-bit, 24000 Hz. Same `X-Audio-*` headers as
+`POST /tts` (see above).
 
 **Example**
 

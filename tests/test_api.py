@@ -48,7 +48,10 @@ class TestHealth:
 
     def test_body(self, client: TestClient) -> None:
         r = client.get("/health")
-        assert r.json() == {"status": "ok", "model": "chatterbox-turbo"}
+        body = r.json()
+        assert body["status"] == "ok"
+        assert body["model"] == "chatterbox-turbo"
+        assert body["sample_rate"] == 24000  # MOCK_SR from conftest
 
 
 # ---------------------------------------------------------------------------

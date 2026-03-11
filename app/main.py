@@ -58,7 +58,12 @@ def _encode_wav(wav: torch.Tensor, sample_rate: int) -> bytes:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "model": "chatterbox-turbo"}
+    model = getattr(app.state, "model", None)
+    return {
+        "status": "ok",
+        "model": "chatterbox-turbo",
+        "sample_rate": model.sr if model is not None else None,
+    }
 
 
 def _audio_headers(wav: torch.Tensor, sample_rate: int) -> dict:

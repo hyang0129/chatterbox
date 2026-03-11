@@ -94,8 +94,15 @@ from chatterbox.tts_turbo import ChatterboxTurboTTS
 
 model = ChatterboxTurboTTS.from_pretrained(device="cuda")
 wav = model.generate("Hello, how are you?")
+# model.sr is the native output sample rate (24000 Hz).
+# Pass it to sf.write so the WAV header is correct.
 sf.write("output.wav", wav.squeeze(0).cpu().numpy(), model.sr)
 ```
+
+> **Output sample rate:** `model.sr` is 24000 Hz. If downstream tools expect a different
+> rate (e.g. 44100 Hz for broadcast, 22050 Hz for Rhubarb lip-sync), resample before writing:
+>
+>     ffmpeg -i output.wav -ar 22050 output_22050.wav
 
 ### Voice cloning (serverless)
 
