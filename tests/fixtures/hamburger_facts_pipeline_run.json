@@ -1,0 +1,63 @@
+{
+  "description": "Exact vo_line texts from the most recent full video-agent pipeline run (sp_2026-03-10_hamburger_facts_facts_acb60e). These are the texts the pipeline would have sent to ElevenLabs TTS. Used as input for the chatterbox pipeline-compatibility integration test.",
+  "source": "results/sp_2026-03-10_hamburger_facts_facts_acb60e/script_package.json",
+  "run_id": "sp_2026-03-10_hamburger_facts_facts_acb60e",
+  "topic": "hamburger_facts",
+  "scenes": [
+    {
+      "scene_id": "scene_01",
+      "on_screen_text": "NOT from Hamburg?",
+      "vo_line": "Did you know? The hamburger wasn't actually invented in Hamburg, Germany.",
+      "t_start_s": 0.0,
+      "t_end_s": 5.0
+    },
+    {
+      "scene_id": "scene_02",
+      "on_screen_text": "The Great Burger Debate",
+      "vo_line": "The real origin story is a fierce historical debate between multiple countries claiming they invented it first.",
+      "t_start_s": 5.0,
+      "t_end_s": 11.0
+    },
+    {
+      "scene_id": "scene_03",
+      "on_screen_text": "Louis' Lunch - 1900",
+      "vo_line": "America claims the honor with Louis' Lunch in Connecticut serving the first hamburger in 1900.",
+      "t_start_s": 11.0,
+      "t_end_s": 17.0
+    },
+    {
+      "scene_id": "scene_04",
+      "on_screen_text": "Hamburg's Counter-Claim",
+      "vo_line": "But Hamburg, Germany argues their 'steak tartare' — raw minced beef — was the inspiration behind the beef patty.",
+      "t_start_s": 17.0,
+      "t_end_s": 23.0
+    },
+    {
+      "scene_id": "scene_05",
+      "on_screen_text": "How The Name Traveled",
+      "vo_line": "The name 'hamburger' likely comes from Hamburg immigrants who brought their beef preparation methods to America.",
+      "t_start_s": 23.0,
+      "t_end_s": 29.0
+    },
+    {
+      "scene_id": "scene_06",
+      "on_screen_text": "1904 World's Fair",
+      "vo_line": "The first hamburger bun wasn't introduced until the 1904 World's Fair in St. Louis — before that, burgers were eaten with bread slices.",
+      "t_start_s": 29.0,
+      "t_end_s": 37.0
+    },
+    {
+      "scene_id": "scene_07",
+      "on_screen_text": "Which fact surprised you?",
+      "vo_line": "Which fact surprised you most? Follow for more incredible food history and burger facts you never knew!",
+      "t_start_s": 37.0,
+      "t_end_s": 43.0
+    }
+  ],
+  "default_tts_params": {
+    "temperature": 0.8,
+    "top_p": 0.95,
+    "top_k": 1000,
+    "repetition_penalty": 1.2
+  }
+}
