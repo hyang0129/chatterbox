@@ -1,0 +1,37 @@
+{
+  "description": "Segment narration texts from the video-agent WW2 tanks script package. These represent the exact POST /tts request bodies the video-agent pipeline sends to Chatterbox.",
+  "source": "video-agent tests/fixtures/script_package_ww2_tanks.json",
+  "segments": [
+    {
+      "segment_id": 1,
+      "text": "Did you know Allied soldiers called any enemy tank a Tiger — regardless of its actual type — because the Tiger I was so feared?",
+      "duration_seconds": 7
+    },
+    {
+      "segment_id": 2,
+      "text": "The American M4 Sherman was produced over 49,000 times — winning through sheer quantity over German armor quality.",
+      "duration_seconds": 7
+    },
+    {
+      "segment_id": 3,
+      "text": "The Soviet T-34 shocked German engineers so much they considered copying its sloped armor for their own future tank designs.",
+      "duration_seconds": 7
+    },
+    {
+      "segment_id": 4,
+      "text": "Germany's Panzer VIII Maus weighed 188 tonnes — so heavy it could only cross rivers by driving along the submerged riverbed.",
+      "duration_seconds": 7
+    },
+    {
+      "segment_id": 5,
+      "text": "Britain's Hobart's Funnies were Churchill variants that could flail mines, bridge gaps, and lay roads — revolutionizing assault engineering.",
+      "duration_seconds": 7
+    }
+  ],
+  "default_tts_params": {
+    "temperature": 0.8,
+    "top_p": 0.95,
+    "top_k": 1000,
+    "repetition_penalty": 1.2
+  }
+}

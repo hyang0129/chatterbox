@@ -186,6 +186,34 @@ silently get audio at the wrong playback speed unless they explicitly resample.
 
 ---
 
+## Implementation Order
+
+The following sequence is logically constrained by dependencies and risk:
+
+| Step | Issue | Why this order |
+|------|-------|---------------|
+| 1 | **BUG-1 + BUG-2** | Highest severity. BUG-2 is addressed as part of BUG-1 — `get_running_loop()` is used when adding `run_in_executor`. These two are done together in a single commit. |
+| 2 | **FEAT-4** | No dependencies. Pure addition of `app/models.py`. Unblocks video-agent client code immediately. |
+| 3 | **FEAT-5** | Depends on BUG-1 (async endpoint must exist to add headers cleanly). Adds zero-cost metadata to the response. |
+| 4 | **FEAT-6** | Depends on FEAT-5 (health endpoint already touched; `/health` and `docs/api.md` updated in the same pass). Mostly documentation. |
+| 5 | **BUG-3** | Documentation-only. Done last since the thread-safety constraint is already captured in the issue doc and integration plan. Low risk of regression. |
+
+### Detailed issue docs
+
+Each issue has a dedicated design doc under `docs/issues/`:
+
+- [`docs/issues/BUG-1-async-endpoint-lock.md`](issues/BUG-1-async-endpoint-lock.md)
+- [`docs/issues/BUG-2-asyncio-get-running-loop.md`](issues/BUG-2-asyncio-get-running-loop.md)
+- [`docs/issues/BUG-3-thread-safety-docs.md`](issues/BUG-3-thread-safety-docs.md)
+- [`docs/issues/FEAT-4-tts-request-dataclass.md`](issues/FEAT-4-tts-request-dataclass.md)
+- [`docs/issues/FEAT-5-response-headers.md`](issues/FEAT-5-response-headers.md)
+- [`docs/issues/FEAT-6-sample-rate-docs.md`](issues/FEAT-6-sample-rate-docs.md)
+
+Each doc contains: problem description, implementation plan with code, and a testing plan
+with fixture texts drawn from the video-agent WW2 tanks script (`tests/fixtures/ww2_tanks_segments.json`).
+
+---
+
 ## API Contract Decision
 
 ### Candidates reviewed
