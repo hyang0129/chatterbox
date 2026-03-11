@@ -11,9 +11,13 @@ Supports two usage modes:
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) with **WSL 2 backend**
 - [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) (enables `--gpus all`)
 - VS Code with the [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) extension
-- NVIDIA GPU with ≥6 GB VRAM and **CUDA capability sm_89+**
+- **NVIDIA GPU with ≥6 GB VRAM and CUDA capability sm_89+** (required — CPU inference is not supported)
   - Tested on RTX 5070 Ti Laptop (Blackwell sm_120, 12 GB VRAM)
   - Blackwell (RTX 50xx) requires the cu128 PyTorch build — handled automatically
+
+> **GPU required.** This project does not support CPU-only inference. Both the server and
+> serverless modes call `ChatterboxTurboTTS.from_pretrained(device="cuda")` and require a
+> CUDA-capable GPU. Running on CPU will fail at model load time.
 
 ## Setup
 

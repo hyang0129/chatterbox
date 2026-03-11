@@ -49,7 +49,7 @@ class TTSRequest(BaseModel):
 def _encode_wav(wav: torch.Tensor, sample_rate: int) -> bytes:
     """Encode a (1, N) float32 waveform tensor to WAV bytes."""
     buf = io.BytesIO()
-    sf.write(buf, wav[0].cpu().numpy(), sample_rate, format="WAV", subtype="FLOAT")
+    sf.write(buf, wav[0].cpu().numpy(), sample_rate, format="WAV", subtype="PCM_16")
     buf.seek(0)
     return buf.read()
 

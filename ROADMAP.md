@@ -1,5 +1,191 @@
 # Roadmap — Chatterbox HTTPS Server
 
+---
+
+## Bug Fixes & Client Integration Requirements
+
+These items were surfaced during integration with the video-agent pipeline and represent
+correctness bugs or missing contract features that block reliable client use. They should
+be resolved before Stage 1 work is considered stable.
+
+---
+
+### BUG-1 — `/tts` endpoint is sync: `asyncio.Lock` cannot be used, concurrent requests race on the GPU
+
+**Severity:** High — silent correctness bug; can cause CUDA OOM or corrupted audio under concurrency.
+
+**Root cause:**
+`app/main.py::synthesize` is declared `def synthesize` (synchronous). FastAPI dispatches
+sync routes to a `ThreadPoolExecutor`, so two concurrent HTTP requests can both call
+`model.generate()` at the same time on the same model instance. `ChatterboxTurboTTS` is
+not thread-safe; concurrent `generate()` calls on a shared GPU model risk CUDA OOM and
+non-deterministic output.
+
+Additionally, because the endpoint is sync, an `asyncio.Lock` placed on `app.state` is
+unreachable — you cannot `await` inside a sync function, so the lock is silently never
+acquired.
+
+**Required fix:**
+Convert the endpoint to `async def` and serialise inference with an `asyncio.Lock` held
+for the duration of each `generate()` call. Move the blocking CPU/GPU work off the event
+loop with `run_in_executor` so uvicorn can still accept new connections while inference runs:
+
+```python
+# In lifespan:
+app.state.lock = asyncio.Lock()
+
+# Endpoint:
+@app.post("/tts", ...)
+async def synthesize(req: TTSRequest) -> Response:
+    async with app.state.lock:
+        wav = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: app.state.model.generate(req.text, ...)
+        )
+    return Response(content=_encode_wav(wav, app.state.model.sr), media_type="audio/wav")
+```
+
+Concurrent HTTP requests will queue behind the lock; they do not fail unless a client
+timeout fires. This is the correct behaviour for a single-GPU inference server.
+
+---
+
+### BUG-2 — `asyncio.get_event_loop()` is deprecated in Python 3.10+ and will break
+
+**Severity:** Medium — currently emits DeprecationWarnings; will raise `RuntimeError` in a future Python version.
+
+**Root cause:**
+Any code path that calls `asyncio.get_event_loop()` inside a running coroutine (e.g. after
+BUG-1 is fixed and the endpoint becomes `async def`) uses the deprecated form. Python 3.10
+deprecated `get_event_loop()` when there is no current event loop in the calling thread;
+Python 3.12 makes this an error inside coroutines.
+
+**Required fix:**
+Replace all `asyncio.get_event_loop()` calls inside coroutines with
+`asyncio.get_running_loop()`. This is always safe inside an `async def` function and is
+the forward-compatible form:
+
+```python
+# Before (deprecated):
+loop = asyncio.get_event_loop()
+wav = await loop.run_in_executor(None, ...)
+
+# After:
+wav = await asyncio.get_running_loop().run_in_executor(None, ...)
+```
+
+---
+
+### BUG-3 — Direct (serverless) mode thread-safety is undocumented; callers may use it unsafely
+
+**Severity:** Medium — silent data corruption or CUDA OOM if callers share a model instance across threads.
+
+**Root cause:**
+The serverless usage pattern (`ChatterboxTurboTTS.from_pretrained(device="cuda")` called
+once, then `model.generate()` called per segment) is not thread-safe. Nothing in the
+README, docstrings, or API reference communicates this constraint.
+
+Callers that share a single model instance across threads (e.g. via a
+`ThreadPoolExecutor`) will hit race conditions on internal model state, CUDA stream
+conflicts, and potential OOM from overlapping allocations.
+
+**Required fix:**
+Add an explicit thread-safety warning to the README serverless section and to the
+`ChatterboxTurboTTS` class docstring:
+
+> **Thread safety:** A single `ChatterboxTurboTTS` instance must not be used from multiple
+> threads concurrently. If you need concurrent synthesis, create one model instance per
+> thread, or serialise all `generate()` calls behind a `threading.Lock`. On a single GPU
+> with limited VRAM, serial single-instance use is strongly recommended.
+
+Pipeline callers using `chatterbox_direct` backend mode must run the audio stage with
+`serial=True` (no `ThreadPoolExecutor`). Violating this causes non-deterministic output
+and potential CUDA OOM.
+
+---
+
+### FEAT-4 — Export a stdlib `TTSRequest` dataclass so clients don't depend on FastAPI/Pydantic
+
+**Severity:** Low — currently forces clients to either duplicate the request schema or take a FastAPI dependency just for the type.
+
+**Context:**
+`TTSRequest` is currently a Pydantic `BaseModel` defined inside `app/main.py`. Clients
+that want to construct a typed request object (e.g. the video-agent's
+`src/tools/chatterbox_backend.py`) cannot import it without depending on `fastapi` and
+`pydantic`, which are server-side dependencies.
+
+**Requested addition:**
+Add a pure-stdlib dataclass to `app/models.py` (or a standalone `chatterbox_client.py`)
+that clients can import with zero heavy dependencies:
+
+```python
+from dataclasses import dataclass, field
+
+@dataclass
+class TTSRequest:
+    text: str
+    temperature: float = 0.8
+    top_p: float = 0.95
+    top_k: int = 1000
+    repetition_penalty: float = 1.2
+
+    def as_dict(self) -> dict:
+        return {
+            "text": self.text,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "top_k": self.top_k,
+            "repetition_penalty": self.repetition_penalty,
+        }
+```
+
+The server-side Pydantic model can remain as-is for validation; this dataclass is an
+additional client-facing type.
+
+---
+
+### FEAT-5 — `/tts` should return synthesis metadata in response headers
+
+**Severity:** Low — callers currently must run `ffprobe` or parse the WAV header to obtain audio duration.
+
+**Context:**
+The `/tts` endpoint returns raw WAV bytes only. Clients that need the audio duration for
+timeline alignment (e.g. to check whether the synthesised segment fits a planned scene
+window) must shell out to `ffprobe` or parse the RIFF header themselves.
+
+**Requested addition:**
+Include the following HTTP response headers alongside the audio body:
+
+| Header | Example | Notes |
+|--------|---------|-------|
+| `X-Audio-Duration-S` | `4.23` | Duration in seconds, two decimal places |
+| `X-Sample-Rate` | `24000` | Native model sample rate (`model.sr`) |
+| `X-Audio-Frames` | `101520` | Total PCM frame count |
+
+These are zero-cost to produce (all values are known before the response is sent) and
+eliminate the need for a second tool invocation on the client side.
+
+---
+
+### FEAT-6 — Document the native output sample rate (`model.sr`) in the API reference and README
+
+**Severity:** Low — callers piping audio into tools that assume a different rate will get pitch/speed errors without warning.
+
+**Context:**
+`ChatterboxTurboTTS` outputs audio at its native sample rate, accessible as `model.sr`.
+This value is not documented anywhere in the README, `docs/api.md`, or the `/health`
+endpoint. Callers that pass the WAV to tools expecting a specific rate (e.g. `ffmpeg`
+pipelines configured for 44100 Hz, or Rhubarb lip-sync configured for 22050 Hz) will
+silently get audio at the wrong playback speed unless they explicitly resample.
+
+**Requested additions:**
+1. Document `model.sr` (e.g. `24000 Hz`) in `docs/api.md` under response format.
+2. Include `"sample_rate": model.sr` in the `/health` response body.
+3. (Optional) Accept an optional `sample_rate` request parameter; if provided and
+   different from `model.sr`, resample before returning. This lets clients avoid a
+   separate `ffmpeg` resampling step.
+
+---
+
 ## API Contract Decision
 
 ### Candidates reviewed
