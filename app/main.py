@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import os
@@ -24,6 +25,7 @@ MAX_TEXT_LEN = 5000
 async def lifespan(app: FastAPI):
     logger.info("Loading ChatterboxTurboTTS on %s...", DEVICE)
     app.state.model = ChatterboxTurboTTS.from_pretrained(device=DEVICE)
+    app.state.lock = asyncio.Lock()
     logger.info("Model ready.")
     yield
 
@@ -60,15 +62,19 @@ def health() -> dict:
 
 
 @app.post("/tts", responses={200: {"content": {"audio/wav": {}}}})
-def synthesize(req: TTSRequest) -> Response:
+async def synthesize(req: TTSRequest) -> Response:
     model: ChatterboxTurboTTS = app.state.model
-    wav = model.generate(
-        req.text,
-        temperature=req.temperature,
-        top_p=req.top_p,
-        top_k=req.top_k,
-        repetition_penalty=req.repetition_penalty,
-    )
+    async with app.state.lock:
+        wav = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: model.generate(
+                req.text,
+                temperature=req.temperature,
+                top_p=req.top_p,
+                top_k=req.top_k,
+                repetition_penalty=req.repetition_penalty,
+            ),
+        )
     return Response(content=_encode_wav(wav, model.sr), media_type="audio/wav")
 
 
@@ -103,14 +109,18 @@ async def synthesize_clone(
         tmp_path = tmp.name
 
     try:
-        wav = model.generate(
-            text,
-            audio_prompt_path=tmp_path,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k,
-            repetition_penalty=repetition_penalty,
-        )
+        async with app.state.lock:
+            wav = await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: model.generate(
+                    text,
+                    audio_prompt_path=tmp_path,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    repetition_penalty=repetition_penalty,
+                ),
+            )
     finally:
         os.unlink(tmp_path)
 
