@@ -264,3 +264,52 @@ class TestTTSClone:
             files={"reference_audio": ("ref.wav", _make_wav_bytes(), "audio/wav")},
         )
         assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Response metadata headers (FEAT-5)
+# ---------------------------------------------------------------------------
+
+class TestAudioResponseHeaders:
+    def test_x_audio_duration_s_present(self, client: TestClient, mock_model: MagicMock) -> None:
+        r = client.post("/tts", json={"text": "Header check."})
+        assert "x-audio-duration-s" in r.headers
+
+    def test_x_audio_duration_s_is_positive_float(
+        self, client: TestClient, mock_model: MagicMock
+    ) -> None:
+        r = client.post("/tts", json={"text": "Duration float check."})
+        val = float(r.headers["x-audio-duration-s"])
+        assert val > 0.0
+
+    def test_x_sample_rate_matches_model_sr(
+        self, client: TestClient, mock_model: MagicMock
+    ) -> None:
+        r = client.post("/tts", json={"text": "Sample rate check."})
+        # conftest.py MOCK_SR = 24000
+        assert r.headers["x-sample-rate"] == "24000"
+
+    def test_x_audio_frames_is_positive_integer(
+        self, client: TestClient, mock_model: MagicMock
+    ) -> None:
+        r = client.post("/tts", json={"text": "Frame count check."})
+        frames = int(r.headers["x-audio-frames"])
+        assert frames > 0
+
+    def test_duration_consistency(self, client: TestClient, mock_model: MagicMock) -> None:
+        """frames / sample_rate must equal reported duration (within rounding)."""
+        r = client.post("/tts", json={"text": "Consistency check."})
+        sr = int(r.headers["x-sample-rate"])
+        frames = int(r.headers["x-audio-frames"])
+        duration = float(r.headers["x-audio-duration-s"])
+        assert abs(frames / sr - duration) < 0.01
+
+    def test_clone_also_returns_headers(self, client: TestClient, mock_model: MagicMock) -> None:
+        r = client.post(
+            "/tts/clone",
+            data={"text": "Clone header check."},
+            files={"reference_audio": ("ref.wav", _make_wav_bytes(), "audio/wav")},
+        )
+        assert "x-audio-duration-s" in r.headers
+        assert "x-sample-rate" in r.headers
+        assert "x-audio-frames" in r.headers

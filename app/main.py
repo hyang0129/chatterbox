@@ -61,6 +61,16 @@ def health() -> dict:
     return {"status": "ok", "model": "chatterbox-turbo"}
 
 
+def _audio_headers(wav: torch.Tensor, sample_rate: int) -> dict:
+    """Build X-Audio-* response headers from a (1, N) waveform tensor."""
+    frame_count = wav.shape[-1]
+    return {
+        "X-Audio-Duration-S": f"{frame_count / sample_rate:.2f}",
+        "X-Sample-Rate": str(sample_rate),
+        "X-Audio-Frames": str(frame_count),
+    }
+
+
 @app.post("/tts", responses={200: {"content": {"audio/wav": {}}}})
 async def synthesize(req: TTSRequest) -> Response:
     model: ChatterboxTurboTTS = app.state.model
@@ -75,7 +85,11 @@ async def synthesize(req: TTSRequest) -> Response:
                 repetition_penalty=req.repetition_penalty,
             ),
         )
-    return Response(content=_encode_wav(wav, model.sr), media_type="audio/wav")
+    return Response(
+        content=_encode_wav(wav, model.sr),
+        media_type="audio/wav",
+        headers=_audio_headers(wav, model.sr),
+    )
 
 
 @app.post("/tts/clone", responses={200: {"content": {"audio/wav": {}}}})
@@ -124,4 +138,8 @@ async def synthesize_clone(
     finally:
         os.unlink(tmp_path)
 
-    return Response(content=_encode_wav(wav, model.sr), media_type="audio/wav")
+    return Response(
+        content=_encode_wav(wav, model.sr),
+        media_type="audio/wav",
+        headers=_audio_headers(wav, model.sr),
+    )
