@@ -81,7 +81,7 @@ class _Conditionals:
         torch.save({"t3": self.t3, "gen": self.gen}, path)
 
     @staticmethod
-    def load(path):
+    def load(path, **kwargs):
         """Mock load that returns a stub Conditionals with valid tensors."""
         t3 = _T3Cond(
             speaker_emb=torch.randn(1, 256),

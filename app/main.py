@@ -16,8 +16,11 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
 from app.voices import (
+    CALIBRATION_TEXT,
+    CALIBRATION_WORD_COUNT,
     DEFAULT_MAX_DURATION_S,
     VoiceListResponse,
+    VoiceMetadata,
     VoiceStore,
 )
 
@@ -69,6 +72,7 @@ class TTSRequest(BaseModel):
 class VoiceCreateResponse(BaseModel):
     voice_id: str
     name: str
+    wpm: float | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +170,29 @@ def _blend_conditionals(
     return Conditionals(t3_cond, gen_dict)
 
 
+def _calibrate_wpm(
+    model: ChatterboxTurboTTS,
+    *,
+    audio_prompt_path: str | None,
+    conditionals_path: str | None,
+) -> float:
+    """Synthesize the calibration passage and return estimated WPM."""
+    wav = _generate_with_voice(
+        model,
+        text=CALIBRATION_TEXT,
+        audio_prompt_path=audio_prompt_path,
+        conditionals_path=conditionals_path,
+        temperature=0.8,
+        top_p=0.95,
+        top_k=1000,
+        repetition_penalty=1.2,
+    )
+    duration_s = wav.shape[-1] / model.sr
+    if duration_s <= 0:
+        return 0.0
+    return CALIBRATION_WORD_COUNT / (duration_s / 60.0)
+
+
 # ---------------------------------------------------------------------------
 # 1. POST /tts — synthesize speech with a voice ID
 # ---------------------------------------------------------------------------
@@ -203,10 +230,14 @@ async def synthesize(req: TTSRequest) -> Response:
                 repetition_penalty=req.repetition_penalty,
             ),
         )
+    headers = _audio_headers(wav, model.sr)
+    voice_meta = voice_store.get_voice(req.voice)
+    if voice_meta and voice_meta.wpm is not None:
+        headers["X-Voice-WPM"] = f"{voice_meta.wpm:.1f}"
     return Response(
         content=_encode_wav(wav, model.sr),
         media_type="audio/wav",
-        headers=_audio_headers(wav, model.sr),
+        headers=headers,
     )
 
 
@@ -222,6 +253,7 @@ async def clone_voice(
     max_duration_s: float = Form(DEFAULT_MAX_DURATION_S, ge=3.0, le=7200.0),
 ) -> VoiceCreateResponse:
     """Register a new voice by cloning from a reference audio file."""
+    model: ChatterboxTurboTTS = app.state.model
     voice_store: VoiceStore = app.state.voice_store
     audio_bytes = await reference_audio.read()
     original_filename = reference_audio.filename or "unknown.wav"
@@ -235,7 +267,18 @@ async def clone_voice(
     except ValueError as exc:
         raise HTTPException(422, detail=str(exc))
 
-    return VoiceCreateResponse(voice_id=meta.voice_id, name=meta.name)
+    # Calibrate WPM by synthesizing a standard passage with this voice.
+    ref_path = str(voice_store.get_reference_path(meta.voice_id))
+    async with app.state.lock:
+        wpm = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: _calibrate_wpm(
+                model, audio_prompt_path=ref_path, conditionals_path=None
+            ),
+        )
+    voice_store.update_wpm(meta.voice_id, wpm)
+
+    return VoiceCreateResponse(voice_id=meta.voice_id, name=meta.name, wpm=round(wpm, 1))
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +339,18 @@ async def blend_voices(
     except FileExistsError as exc:
         raise HTTPException(409, detail=f"Voice already exists: {exc}")
 
-    return VoiceCreateResponse(voice_id=meta.voice_id, name=meta.name)
+    # Calibrate WPM using the blended conditionals.
+    cond_path = str(voice_store.get_conditionals_path(meta.voice_id))
+    async with app.state.lock:
+        wpm = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: _calibrate_wpm(
+                model, audio_prompt_path=None, conditionals_path=cond_path
+            ),
+        )
+    voice_store.update_wpm(meta.voice_id, wpm)
+
+    return VoiceCreateResponse(voice_id=meta.voice_id, name=meta.name, wpm=round(wpm, 1))
 
 
 def _extract_and_blend(
@@ -328,7 +382,22 @@ async def list_voices() -> VoiceListResponse:
 
 
 # ---------------------------------------------------------------------------
-# 5. DELETE /voices/{voice_id} — delete a voice
+# 5. GET /voices/{voice_id} — voice detail
+# ---------------------------------------------------------------------------
+
+
+@app.get("/voices/{voice_id}", response_model=VoiceMetadata)
+async def get_voice(voice_id: str) -> VoiceMetadata:
+    """Get details for a single voice, including WPM if calibrated."""
+    voice_store: VoiceStore = app.state.voice_store
+    meta = voice_store.get_voice(voice_id)
+    if meta is None:
+        raise HTTPException(404, detail=f"Voice not found: {voice_id}")
+    return meta
+
+
+# ---------------------------------------------------------------------------
+# 6. DELETE /voices/{voice_id} — delete a voice
 # ---------------------------------------------------------------------------
 
 

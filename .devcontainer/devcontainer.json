@@ -13,7 +13,9 @@
     "source=chatterbox-voices,target=/home/vscode/.local/share/chatterbox/voices,type=volume"
   ],
   "containerEnv": {
-    "CHATTERBOX_VOICES_DIR": "/home/vscode/.local/share/chatterbox/voices"
+    "CHATTERBOX_VOICES_DIR": "/home/vscode/.local/share/chatterbox/voices",
+    "CHATTERBOX_SSL_CERTFILE": "${containerWorkspaceFolder}/certs/localhost.pem",
+    "CHATTERBOX_SSL_KEYFILE": "${containerWorkspaceFolder}/certs/localhost-key.pem"
   },
   "forwardPorts": [8000],
   "initializeCommand": ".devcontainer\\initialize.cmd",

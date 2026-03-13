@@ -10,3 +10,9 @@ if [ -f "$GITUSER_TMP" ]; then
   [ -n "$GIT_EMAIL" ] && git config --global user.email "$GIT_EMAIL"
   rm -f "$GITUSER_TMP"
 fi
+
+# Generate self-signed TLS certificate for local HTTPS development.
+CERT_SCRIPT="$(dirname "$0")/../scripts/generate-cert.sh"
+if [ -x "$CERT_SCRIPT" ]; then
+  "$CERT_SCRIPT" "$(dirname "$0")/../certs"
+fi

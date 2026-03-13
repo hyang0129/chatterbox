@@ -12,3 +12,4 @@ voices/*
 !voices/kronimi7030/
 .env
 tests/integration/artifacts/
+certs/*.pem

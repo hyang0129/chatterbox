@@ -56,6 +56,26 @@ Start the API server:
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
+### HTTPS (local dev)
+
+A self-signed certificate is generated automatically by the dev container's
+`postCreateCommand`. To start the server with HTTPS:
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000 \
+    --ssl-keyfile certs/localhost-key.pem \
+    --ssl-certfile certs/localhost.pem
+```
+
+To regenerate the certificate manually:
+
+```bash
+./scripts/generate-cert.sh
+```
+
+Clients can bypass the self-signed cert warning with `curl -k` or by
+setting `verify=False` in Python's `httpx`/`requests`.
+
 ### Synthesize speech
 
 The server ships with a default voice (`kronimi7030`) — no setup required:
@@ -78,12 +98,14 @@ curl -X POST http://localhost:8000/tts \
 
 ### Clone a voice
 
-Register a new voice from a reference audio file:
+Register a new voice from a reference audio file. The server automatically
+calibrates the voice's speaking rate (WPM) after registration:
 
 ```bash
 curl -X POST http://localhost:8000/voices/clone \
   -F "name=Sarah Warm" \
   -F "reference_audio=@sarah_sample.wav"
+# → {"voice_id": "sarah-warm", "name": "Sarah Warm", "wpm": 142.5}
 ```
 
 ### Blend voices
@@ -114,8 +136,11 @@ curl -X POST http://localhost:8000/voices/blend \
 ### Voice management
 
 ```bash
-# List all registered voices
+# List all registered voices (includes wpm for each)
 curl http://localhost:8000/voices
+
+# Get details for a single voice
+curl http://localhost:8000/voices/sarah-warm
 
 # Delete a voice
 curl -X DELETE http://localhost:8000/voices/sarah-warm
@@ -202,6 +227,9 @@ tests/
     artifacts/          # Generated WAV files saved here for review
 voices/
   kronimi7030/           # Default shipped voice (70/30 kronii-nimi blend)
+scripts/
+  generate-cert.sh      # Self-signed TLS cert generator (idempotent)
+certs/                  # Generated .pem files (gitignored)
 .devcontainer/
   devcontainer.json     # GPU passthrough, port 8000, HF cache + voices volumes
   Dockerfile            # CUDA 12.8 + Python 3.11

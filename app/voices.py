@@ -23,6 +23,16 @@ MIN_SAMPLE_RATE = 16000
 # Audio formats that soundfile (libsndfile) can read natively.
 _SOUNDFILE_EXTENSIONS = {".wav", ".flac", ".ogg", ".aiff", ".aif"}
 
+# Calibration passage for WPM estimation — 60 words, phonetically diverse,
+# neutral content. Used at voice registration time to measure speaking rate.
+CALIBRATION_TEXT = (
+    "The quick brown fox jumps over the lazy dog near a quiet river bank. "
+    "Bright yellow flowers bloom across the meadow while gentle winds carry "
+    "the scent of fresh pine through the valley below. A distant church bell "
+    "rings twice, marking the hour as birds circle overhead in wide arcs."
+)
+CALIBRATION_WORD_COUNT = len(CALIBRATION_TEXT.split())
+
 
 class VoiceMetadata(BaseModel):
     voice_id: str
@@ -31,6 +41,7 @@ class VoiceMetadata(BaseModel):
     created_at: datetime
     duration_s: float
     sample_rate: int
+    wpm: float | None = None
 
 
 class VoiceListResponse(BaseModel):
@@ -254,6 +265,16 @@ class VoiceStore:
         self._index[voice_id] = meta
         logger.info("Created blended voice %r (id=%s)", name, voice_id)
         return meta
+
+    def update_wpm(self, voice_id: str, wpm: float) -> None:
+        """Update the WPM estimate for a voice and persist to disk."""
+        meta = self._index.get(voice_id)
+        if meta is None:
+            raise KeyError(voice_id)
+        meta = meta.model_copy(update={"wpm": round(wpm, 1)})
+        self._index[voice_id] = meta
+        meta_path = self._base_dir / voice_id / "metadata.json"
+        meta_path.write_text(meta.model_dump_json(indent=2))
 
     def delete_voice(self, voice_id: str) -> bool:
         """Remove a voice from disk and index. Returns False if not found."""

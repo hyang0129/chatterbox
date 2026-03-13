@@ -47,6 +47,7 @@ Synthesize speech from text using a registered voice. Returns a WAV audio file.
 | `X-Audio-Duration-S` | `4.23` | Audio duration in seconds (two decimal places) |
 | `X-Sample-Rate` | `24000` | Sample rate of the returned WAV |
 | `X-Audio-Frames` | `101520` | Total PCM frame count |
+| `X-Voice-WPM` | `142.5` | Estimated words-per-minute for this voice (only present if the voice has been calibrated) |
 
 **Example**
 
@@ -84,9 +85,13 @@ Accepts `multipart/form-data`.
 ```json
 {
   "voice_id": "sarah-warm",
-  "name": "Sarah Warm"
+  "name": "Sarah Warm",
+  "wpm": 142.5
 }
 ```
+
+After saving the reference audio, the server synthesizes a calibration passage
+with the new voice and measures the output duration to estimate words-per-minute.
 
 **Errors:** `409` if a voice with the same slug already exists, `422` if audio is invalid.
 
@@ -129,9 +134,13 @@ Accepts `multipart/form-data`.
 ```json
 {
   "voice_id": "custom-blend",
-  "name": "Custom Blend"
+  "name": "Custom Blend",
+  "wpm": 138.2
 }
 ```
+
+After blending, the server synthesizes a calibration passage with the new voice
+to estimate words-per-minute.
 
 **Errors:** `404` if either source voice is not found, `409` if the name already exists.
 
@@ -170,10 +179,42 @@ List all registered voices.
       "original_filename": "blend:kroniivoice.mp3+nimivoice.mp3",
       "created_at": "2026-03-13T03:36:02Z",
       "duration_s": 0.0,
-      "sample_rate": 24000
+      "sample_rate": 24000,
+      "wpm": 142.5
     }
   ]
 }
+```
+
+The `wpm` field is `null` for voices that were registered before WPM calibration
+was introduced (legacy voices).
+
+---
+
+## GET /voices/{voice_id}
+
+Get details for a single voice.
+
+**Response** — `200 OK`
+
+```json
+{
+  "voice_id": "sarah-warm",
+  "name": "Sarah Warm",
+  "original_filename": "sarah_sample.wav",
+  "created_at": "2026-03-13T12:00:00Z",
+  "duration_s": 8.5,
+  "sample_rate": 24000,
+  "wpm": 142.5
+}
+```
+
+**Errors:** `404` if the voice does not exist.
+
+**Example**
+
+```bash
+curl http://localhost:8000/voices/sarah-warm
 ```
 
 ---
