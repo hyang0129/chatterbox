@@ -3,7 +3,7 @@
 Dev container for running [Chatterbox Turbo TTS](https://github.com/resemble-ai/chatterbox) locally — a 350M-parameter, single-step text-to-speech model from Resemble AI.
 
 Supports two usage modes:
-- **Server** — FastAPI + Uvicorn HTTP API (`POST /tts`, `POST /tts/clone`)
+- **Server** — FastAPI + Uvicorn HTTP API (`POST /tts`, `POST /tts/clone`, voice management)
 - **Serverless** — call the model directly from Python
 
 ## Prerequisites
@@ -65,13 +65,37 @@ curl -X POST http://localhost:8000/tts \
   --output output.wav
 ```
 
-### Voice cloning
+### Voice cloning (ad-hoc)
 
 ```bash
 curl -X POST http://localhost:8000/tts/clone \
   -F "text=Hello, how are you?" \
   -F "reference_audio=@reference.wav" \
   --output output.wav
+```
+
+### Voice management
+
+Register persistent voice references so you don't need to upload audio on every request.
+Voices are stored on disk (configurable via `CHATTERBOX_VOICES_DIR`, default `./voices/`).
+
+```bash
+# Register a voice from a reference audio file (WAV, MP3, FLAC, OGG)
+curl -X POST http://localhost:8000/v1/voices \
+  -F "name=Sarah Warm" \
+  -F "reference_audio=@sarah_sample.wav"
+
+# List all registered voices
+curl http://localhost:8000/v1/voices
+
+# Synthesize using a registered voice
+curl -X POST http://localhost:8000/tts \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Hello!", "voice": "sarah-warm"}' \
+  --output output.wav
+
+# Delete a voice
+curl -X DELETE http://localhost:8000/v1/voices/sarah-warm
 ```
 
 See [docs/api.md](docs/api.md) for all endpoints, parameters, and response formats.
@@ -142,15 +166,20 @@ The GPU tests require `HF_TOKEN` to be set in `.env` and a CUDA-capable GPU.
 
 ```
 app/
-  main.py               # FastAPI server (POST /tts, POST /tts/clone)
+  main.py               # FastAPI server (POST /tts, POST /tts/clone, /v1/voices)
+  models.py             # Pydantic/dataclass request models
+  voices.py             # VoiceStore — file-based voice reference storage
 tests/
   conftest.py           # Mocked model fixtures for unit tests
-  fixtures/             # Shared test data (ten_second_script.json)
+  test_api.py           # API endpoint tests
+  test_voices.py        # Voice management endpoint tests
+  fixtures/             # Shared test data (ten_second_script.json, nimivoice.mp3)
   integration/
     conftest.py         # Real model fixtures for GPU tests
     artifacts/          # Generated WAV files saved here for review
+voices/                 # Registered voice references (gitignored)
 .devcontainer/
-  devcontainer.json     # GPU passthrough, port 8000, HF cache volume
+  devcontainer.json     # GPU passthrough, port 8000, HF cache + voices volumes
   Dockerfile            # CUDA 12.8 + Python 3.11
 .env                    # HF_TOKEN (gitignored — create this yourself)
 requirements.txt        # Python dependencies
@@ -162,6 +191,7 @@ docs/
 ## Notes
 
 - Model weights are cached in a named Docker volume (`chatterbox-hf-cache`) and persist across container rebuilds.
+- Registered voices are stored in a named Docker volume (`chatterbox-voices`) and persist across container rebuilds. Set `CHATTERBOX_VOICES_DIR` to override the storage path.
 - `--shm-size 8g` is set in the dev container config to avoid PyTorch shared-memory issues.
 - The Turbo model uses ~3–4 GB VRAM at inference time.
 - `soundfile` is used for WAV encoding (`torchaudio.save` dropped BytesIO support in v2.9).
