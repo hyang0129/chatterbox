@@ -7,6 +7,8 @@ from the test suite.
 import os
 import sys
 import tempfile
+from dataclasses import dataclass
+from typing import Optional
 from unittest.mock import MagicMock
 
 import pytest
@@ -39,9 +41,59 @@ _mock_model_instance = _make_mock_model()
 _mock_tts_turbo = MagicMock()
 _mock_tts_turbo.ChatterboxTurboTTS.from_pretrained.return_value = _mock_model_instance
 
-for _name in ("perth", "librosa", "chatterbox", "chatterbox.tts", "chatterbox.tts_turbo"):
+for _name in (
+    "perth", "librosa",
+    "chatterbox", "chatterbox.tts", "chatterbox.tts_turbo",
+    "chatterbox.models", "chatterbox.models.t3",
+    "chatterbox.models.t3.modules", "chatterbox.models.t3.modules.cond_enc",
+):
     sys.modules.setdefault(_name, MagicMock())
 sys.modules["chatterbox.tts_turbo"] = _mock_tts_turbo  # always override this one
+
+# --------------------------------------------------------------------------
+# Provide real T3Cond / Conditionals so _blend_conditionals can construct
+# instances instead of getting opaque MagicMock objects back.
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class _T3Cond:
+    speaker_emb: torch.Tensor
+    clap_emb: Optional[torch.Tensor] = None
+    cond_prompt_speech_tokens: Optional[torch.Tensor] = None
+    cond_prompt_speech_emb: Optional[torch.Tensor] = None
+    emotion_adv: object = 0.5
+
+    def to(self, *, device=None, dtype=None):
+        return self
+
+
+class _Conditionals:
+    def __init__(self, t3, gen):
+        self.t3 = t3
+        self.gen = gen
+
+    def to(self, device):
+        return self
+
+    def save(self, path):
+        """Mock save — write a small torch checkpoint."""
+        torch.save({"t3": self.t3, "gen": self.gen}, path)
+
+    @staticmethod
+    def load(path):
+        """Mock load that returns a stub Conditionals with valid tensors."""
+        t3 = _T3Cond(
+            speaker_emb=torch.randn(1, 256),
+            cond_prompt_speech_tokens=torch.randint(0, 500, (1, 50)),
+        )
+        gen = {"embedding": torch.randn(1, 192)}
+        return _Conditionals(t3, gen)
+
+
+sys.modules["chatterbox.models.t3.modules.cond_enc"].T3Cond = _T3Cond
+_mock_tts_turbo.T3Cond = _T3Cond
+_mock_tts_turbo.Conditionals = _Conditionals
 
 # --------------------------------------------------------------------------
 # Import app after mocks are in place

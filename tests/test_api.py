@@ -3,23 +3,24 @@ Tests for the Chatterbox Turbo TTS FastAPI server.
 
 Coverage:
 - GET /health
-- POST /tts  — basic synthesis, input validation, parameter ranges, paralinguistic tags
-- POST /tts/clone — voice cloning with reference audio upload
+- POST /tts  — synthesis with default and registered voices, validation, tags
 """
 import io
+import json as json_mod
 import os
-import subprocess
-import tempfile
 import wave
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
 import soundfile as sf
+import torch
 from fastapi.testclient import TestClient
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_wav_bytes(duration_s: float = 6.0, sample_rate: int = 24000) -> bytes:
     """Build a minimal valid mono WAV in memory (silence)."""
@@ -39,9 +40,44 @@ def _assert_valid_wav(data: bytes, expected_sr: int = 24000) -> None:
     assert audio.ndim == 1  # mono
 
 
+def _create_voice(client: TestClient, name: str) -> dict:
+    """Register a voice via the clone endpoint."""
+    r = client.post(
+        "/voices/clone",
+        data={"name": name},
+        files={"reference_audio": ("ref.wav", _make_wav_bytes(), "audio/wav")},
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def _create_precomputed_voice(voice_id: str) -> None:
+    """Create a voice directory with conditionals.pt (no reference WAV)."""
+    voices_dir = os.environ["CHATTERBOX_VOICES_DIR"]
+    voice_dir = os.path.join(voices_dir, voice_id)
+    os.makedirs(voice_dir, exist_ok=True)
+
+    meta = {
+        "voice_id": voice_id,
+        "name": voice_id,
+        "original_filename": "blend",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "duration_s": 0.0,
+        "sample_rate": 24000,
+    }
+    with open(os.path.join(voice_dir, "metadata.json"), "w") as f:
+        json_mod.dump(meta, f)
+
+    torch.save({"dummy": True}, os.path.join(voice_dir, "conditionals.pt"))
+
+    from app.main import app as _app
+    _app.state.voice_store._scan()
+
+
 # ---------------------------------------------------------------------------
 # /health
 # ---------------------------------------------------------------------------
+
 
 class TestHealth:
     def test_status_200(self, client: TestClient) -> None:
@@ -60,16 +96,22 @@ class TestHealth:
 # POST /tts
 # ---------------------------------------------------------------------------
 
+
 class TestTTS:
-    def test_basic_synthesis_200(self, client: TestClient, mock_model: MagicMock) -> None:
+    @pytest.fixture(autouse=True)
+    def _ensure_default_voice(self, mock_model: MagicMock) -> None:
+        """Create the default voice (kronimi7030) with conditionals.pt."""
+        _create_precomputed_voice("kronimi7030")
+
+    def test_basic_synthesis_200(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Hello, world!"})
         assert r.status_code == 200
 
-    def test_content_type_is_wav(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_content_type_is_wav(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Content type check."})
         assert r.headers["content-type"] == "audio/wav"
 
-    def test_response_is_valid_wav(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_response_is_valid_wav(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "WAV structure test."})
         assert r.status_code == 200
         _assert_valid_wav(r.content)
@@ -78,33 +120,62 @@ class TestTTS:
         client.post("/tts", json={"text": "Verify call."})
         mock_model.generate.assert_called_once()
 
+    def test_default_voice_is_kronimi7030(self, client: TestClient) -> None:
+        """Without explicit voice, the default kronimi7030 is used."""
+        r = client.post("/tts", json={"text": "Default voice."})
+        assert r.status_code == 200
+
+    def test_explicit_voice_200(self, client: TestClient) -> None:
+        _create_voice(client, "Speaker One")
+        r = client.post("/tts", json={"text": "Hello.", "voice": "speaker-one"})
+        assert r.status_code == 200
+
+    def test_nonexistent_voice_404(self, client: TestClient) -> None:
+        r = client.post("/tts", json={"text": "Hello.", "voice": "nope"})
+        assert r.status_code == 404
+
+    def test_precomputed_conditionals_used(
+        self, client: TestClient, mock_model: MagicMock
+    ) -> None:
+        """Default voice has conditionals.pt — no audio_prompt_path should be set."""
+        client.post("/tts", json={"text": "Hello."})
+        kwargs = mock_model.generate.call_args.kwargs
+        assert kwargs.get("audio_prompt_path") is None
+
+    def test_reference_wav_voice_passes_audio_prompt(
+        self, client: TestClient, mock_model: MagicMock
+    ) -> None:
+        _create_voice(client, "Prompted")
+        client.post("/tts", json={"text": "Hello.", "voice": "prompted"})
+        kwargs = mock_model.generate.call_args.kwargs
+        assert kwargs["audio_prompt_path"] is not None
+        assert "prompted" in kwargs["audio_prompt_path"]
+
     # --- input validation ---
 
-    def test_empty_string_rejected(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_empty_string_rejected(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": ""})
         assert r.status_code == 422
 
-    def test_whitespace_only_rejected(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_whitespace_only_rejected(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "   \t\n"})
         assert r.status_code == 422
 
-    def test_missing_text_field_rejected(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_missing_text_field_rejected(self, client: TestClient) -> None:
         r = client.post("/tts", json={})
         assert r.status_code == 422
 
-    def test_text_at_max_length_accepted(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_text_at_max_length_accepted(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "A" * 5000})
         assert r.status_code == 200
 
-    def test_text_exceeds_max_length_rejected(
-        self, client: TestClient, mock_model: MagicMock
-    ) -> None:
+    def test_text_exceeds_max_length_rejected(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "A" * 5001})
         assert r.status_code == 422
 
     # --- paralinguistic tags ---
 
-    def test_all_paralinguistic_tags(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_all_paralinguistic_tags(self, client: TestClient) -> None:
         tags = "[cough] [laugh] [chuckle] [sigh] [gasp] [groan] [sniff] [shush] [clear throat]"
         r = client.post("/tts", json={"text": f"Test {tags} done."})
         assert r.status_code == 200
@@ -118,11 +189,11 @@ class TestTTS:
 
     # --- unicode ---
 
-    def test_unicode_latin_extended(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_unicode_latin_extended(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Héllo wörld, café résumé."})
         assert r.status_code == 200
 
-    def test_unicode_cyrillic(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_unicode_cyrillic(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Привет мир."})
         assert r.status_code == 200
 
@@ -132,217 +203,86 @@ class TestTTS:
         client.post("/tts", json={"text": "Hi."})
         assert mock_model.generate.call_args.kwargs["temperature"] == pytest.approx(0.8)
 
-    def test_temperature_custom_accepted(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_temperature_custom_accepted(
+        self, client: TestClient, mock_model: MagicMock
+    ) -> None:
         r = client.post("/tts", json={"text": "Hi.", "temperature": 1.5})
         assert r.status_code == 200
         assert mock_model.generate.call_args.kwargs["temperature"] == pytest.approx(1.5)
 
-    def test_temperature_too_low_rejected(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_temperature_too_low_rejected(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Hi.", "temperature": 0.05})
         assert r.status_code == 422
 
-    def test_temperature_too_high_rejected(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_temperature_too_high_rejected(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Hi.", "temperature": 2.1})
         assert r.status_code == 422
 
-    def test_temperature_boundary_min(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_temperature_boundary_min(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Hi.", "temperature": 0.1})
         assert r.status_code == 200
 
-    def test_temperature_boundary_max(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_temperature_boundary_max(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Hi.", "temperature": 2.0})
         assert r.status_code == 200
 
     # --- top_p ---
 
-    def test_top_p_boundary_zero(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_top_p_boundary_zero(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Hi.", "top_p": 0.0})
         assert r.status_code == 200
 
-    def test_top_p_boundary_one(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_top_p_boundary_one(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Hi.", "top_p": 1.0})
         assert r.status_code == 200
 
-    def test_top_p_above_one_rejected(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_top_p_above_one_rejected(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Hi.", "top_p": 1.01})
         assert r.status_code == 422
 
     # --- repetition_penalty ---
 
-    def test_repetition_penalty_below_min_rejected(
-        self, client: TestClient, mock_model: MagicMock
-    ) -> None:
+    def test_repetition_penalty_below_min_rejected(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Hi.", "repetition_penalty": 0.9})
         assert r.status_code == 422
 
-    def test_repetition_penalty_at_min_accepted(
-        self, client: TestClient, mock_model: MagicMock
-    ) -> None:
+    def test_repetition_penalty_at_min_accepted(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Hi.", "repetition_penalty": 1.0})
         assert r.status_code == 200
 
 
 # ---------------------------------------------------------------------------
-# POST /tts/clone
+# Response metadata headers
 # ---------------------------------------------------------------------------
 
-class TestTTSClone:
-    def test_basic_clone_200(self, client: TestClient, mock_model: MagicMock) -> None:
-        r = client.post(
-            "/tts/clone",
-            data={"text": "Hello from a cloned voice."},
-            files={"reference_audio": ("ref.wav", _make_wav_bytes(), "audio/wav")},
-        )
-        assert r.status_code == 200
-
-    def test_clone_content_type_is_wav(self, client: TestClient, mock_model: MagicMock) -> None:
-        r = client.post(
-            "/tts/clone",
-            data={"text": "Content type check."},
-            files={"reference_audio": ("ref.wav", _make_wav_bytes(), "audio/wav")},
-        )
-        assert r.headers["content-type"] == "audio/wav"
-
-    def test_clone_response_is_valid_wav(self, client: TestClient, mock_model: MagicMock) -> None:
-        r = client.post(
-            "/tts/clone",
-            data={"text": "WAV structure test."},
-            files={"reference_audio": ("ref.wav", _make_wav_bytes(), "audio/wav")},
-        )
-        _assert_valid_wav(r.content)
-
-    def test_clone_passes_audio_prompt_path(
-        self, client: TestClient, mock_model: MagicMock
-    ) -> None:
-        client.post(
-            "/tts/clone",
-            data={"text": "Check audio_prompt_path is set."},
-            files={"reference_audio": ("ref.wav", _make_wav_bytes(), "audio/wav")},
-        )
-        kwargs = mock_model.generate.call_args.kwargs
-        assert "audio_prompt_path" in kwargs
-        assert kwargs["audio_prompt_path"] is not None
-
-    def test_clone_temp_file_cleaned_up(self, client: TestClient, mock_model: MagicMock) -> None:
-        """The temporary reference audio file must be deleted after the request."""
-        client.post(
-            "/tts/clone",
-            data={"text": "Temp file cleanup check."},
-            files={"reference_audio": ("ref.wav", _make_wav_bytes(), "audio/wav")},
-        )
-        tmp_path = mock_model.generate.call_args.kwargs.get("audio_prompt_path", "")
-        assert not os.path.exists(tmp_path), f"Temp file was not deleted: {tmp_path}"
-
-    def test_clone_custom_temperature(self, client: TestClient, mock_model: MagicMock) -> None:
-        client.post(
-            "/tts/clone",
-            data={"text": "Custom temp.", "temperature": "1.2"},
-            files={"reference_audio": ("ref.wav", _make_wav_bytes(), "audio/wav")},
-        )
-        assert mock_model.generate.call_args.kwargs["temperature"] == pytest.approx(1.2)
-
-    def test_clone_empty_text_rejected(self, client: TestClient, mock_model: MagicMock) -> None:
-        r = client.post(
-            "/tts/clone",
-            data={"text": ""},
-            files={"reference_audio": ("ref.wav", _make_wav_bytes(), "audio/wav")},
-        )
-        assert r.status_code == 422
-
-    def test_clone_whitespace_text_rejected(
-        self, client: TestClient, mock_model: MagicMock
-    ) -> None:
-        r = client.post(
-            "/tts/clone",
-            data={"text": "   "},
-            files={"reference_audio": ("ref.wav", _make_wav_bytes(), "audio/wav")},
-        )
-        assert r.status_code == 422
-
-    def test_clone_mp3_reference_200(self, client: TestClient, mock_model: MagicMock) -> None:
-        """MP3 reference audio should be auto-converted to WAV."""
-        wav_data = _make_wav_bytes()
-        with (
-            tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as src,
-            tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as dst,
-        ):
-            src.write(wav_data)
-            src_path, dst_path = src.name, dst.name
-        try:
-            subprocess.run(
-                ["ffmpeg", "-y", "-i", src_path, dst_path],
-                capture_output=True, check=True,
-            )
-            with open(dst_path, "rb") as f:
-                mp3_data = f.read()
-        finally:
-            os.unlink(src_path)
-            os.unlink(dst_path)
-
-        r = client.post(
-            "/tts/clone",
-            data={"text": "Hello from MP3 reference."},
-            files={"reference_audio": ("ref.mp3", mp3_data, "audio/mpeg")},
-        )
-        assert r.status_code == 200
-        assert r.headers["content-type"] == "audio/wav"
-
-    def test_clone_missing_audio_rejected(self, client: TestClient, mock_model: MagicMock) -> None:
-        r = client.post("/tts/clone", data={"text": "No audio file."})
-        assert r.status_code == 422
-
-    def test_clone_missing_text_rejected(self, client: TestClient, mock_model: MagicMock) -> None:
-        r = client.post(
-            "/tts/clone",
-            files={"reference_audio": ("ref.wav", _make_wav_bytes(), "audio/wav")},
-        )
-        assert r.status_code == 422
-
-
-# ---------------------------------------------------------------------------
-# Response metadata headers (FEAT-5)
-# ---------------------------------------------------------------------------
 
 class TestAudioResponseHeaders:
-    def test_x_audio_duration_s_present(self, client: TestClient, mock_model: MagicMock) -> None:
+    @pytest.fixture(autouse=True)
+    def _ensure_default_voice(self, mock_model: MagicMock) -> None:
+        _create_precomputed_voice("kronimi7030")
+
+    def test_x_audio_duration_s_present(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Header check."})
         assert "x-audio-duration-s" in r.headers
 
-    def test_x_audio_duration_s_is_positive_float(
-        self, client: TestClient, mock_model: MagicMock
-    ) -> None:
+    def test_x_audio_duration_s_is_positive_float(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Duration float check."})
         val = float(r.headers["x-audio-duration-s"])
         assert val > 0.0
 
-    def test_x_sample_rate_matches_model_sr(
-        self, client: TestClient, mock_model: MagicMock
-    ) -> None:
+    def test_x_sample_rate_matches_model_sr(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Sample rate check."})
-        # conftest.py MOCK_SR = 24000
         assert r.headers["x-sample-rate"] == "24000"
 
-    def test_x_audio_frames_is_positive_integer(
-        self, client: TestClient, mock_model: MagicMock
-    ) -> None:
+    def test_x_audio_frames_is_positive_integer(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Frame count check."})
         frames = int(r.headers["x-audio-frames"])
         assert frames > 0
 
-    def test_duration_consistency(self, client: TestClient, mock_model: MagicMock) -> None:
+    def test_duration_consistency(self, client: TestClient) -> None:
         """frames / sample_rate must equal reported duration (within rounding)."""
         r = client.post("/tts", json={"text": "Consistency check."})
         sr = int(r.headers["x-sample-rate"])
         frames = int(r.headers["x-audio-frames"])
         duration = float(r.headers["x-audio-duration-s"])
         assert abs(frames / sr - duration) < 0.01
-
-    def test_clone_also_returns_headers(self, client: TestClient, mock_model: MagicMock) -> None:
-        r = client.post(
-            "/tts/clone",
-            data={"text": "Clone header check."},
-            files={"reference_audio": ("ref.wav", _make_wav_bytes(), "audio/wav")},
-        )
-        assert "x-audio-duration-s" in r.headers
-        assert "x-sample-rate" in r.headers
-        assert "x-audio-frames" in r.headers

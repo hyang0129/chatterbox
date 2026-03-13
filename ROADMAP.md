@@ -259,6 +259,44 @@ We will extend with a custom `x-audio-prompt` field (or multipart upload) for vo
 
 ---
 
+## Exploration — Rhythm as Emotion
+
+**Priority:** Very low / research exploration. Not blocking any stage.
+
+**Concept:**
+Voice rhythm (pacing, cadence, emphasis patterns) is not a fixed property of a speaker —
+it shifts significantly with emotional state. A calm speaker uses long, even phrases; an
+anxious speaker uses short, staccato bursts; an excited speaker accelerates and emphasises
+more aggressively.
+
+The `/tts/blend` endpoint already separates **voice texture** (who the speaker is) from
+**voice rhythm** (how they're speaking right now). This separation opens an interesting
+possibility: if we capture multiple reference clips of the *same* speaker in different
+emotional states, we can hold texture constant and swap rhythms to emulate different
+emotions — without any model fine-tuning.
+
+**Exploration tasks:**
+- [ ] Record or collect 3–5 reference clips of a single speaker in distinct emotional
+      states (calm, excited, sad, angry, whispering)
+- [ ] Register each clip as a separate voice (e.g. `sarah-calm`, `sarah-excited`)
+- [ ] Use `/tts/blend` with `texture_mix=0` (pure sarah texture) but vary
+      `rhythm_source` across the emotional variants
+- [ ] Evaluate whether the output convincingly changes emotional delivery while
+      preserving speaker identity
+- [ ] If successful, consider a dedicated `POST /tts/emote` endpoint that accepts a
+      voice ID + an emotion label, mapping internally to the appropriate rhythm reference
+- [ ] Investigate whether rhythm blending (not just selection) is feasible — e.g.
+      averaging the `cond_prompt_speech_tokens` from two emotional states to produce a
+      "partially excited" delivery
+
+**Why this matters:**
+Current emotion control in TTS models is either absent (Chatterbox Turbo disables the
+`emotion_adv` parameter) or requires model-level support. This approach would be a
+purely inference-time technique requiring zero model changes — just careful curation of
+reference clips.
+
+---
+
 ## Stage 1 — Basic local setup with Turbo model
 
 Goal: working HTTPS server on localhost, OpenAI-compatible TTS endpoint, basic tests.

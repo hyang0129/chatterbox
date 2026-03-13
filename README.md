@@ -3,7 +3,7 @@
 Dev container for running [Chatterbox Turbo TTS](https://github.com/resemble-ai/chatterbox) locally — a 350M-parameter, single-step text-to-speech model from Resemble AI.
 
 Supports two usage modes:
-- **Server** — FastAPI + Uvicorn HTTP API (`POST /tts`, `POST /tts/clone`, voice management)
+- **Server** — FastAPI + Uvicorn HTTP API (`POST /tts`, voice cloning, voice blending)
 - **Serverless** — call the model directly from Python
 
 ## Prerequisites
@@ -56,7 +56,9 @@ Start the API server:
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### Basic synthesis
+### Synthesize speech
+
+The server ships with a default voice (`kronimi7030`) — no setup required:
 
 ```bash
 curl -X POST http://localhost:8000/tts \
@@ -65,37 +67,58 @@ curl -X POST http://localhost:8000/tts \
   --output output.wav
 ```
 
-### Voice cloning (ad-hoc)
+Use a specific voice by passing its ID:
 
 ```bash
-curl -X POST http://localhost:8000/tts/clone \
-  -F "text=Hello, how are you?" \
-  -F "reference_audio=@reference.wav" \
-  --output output.wav
-```
-
-### Voice management
-
-Register persistent voice references so you don't need to upload audio on every request.
-Voices are stored on disk (configurable via `CHATTERBOX_VOICES_DIR`, default `./voices/`).
-
-```bash
-# Register a voice from a reference audio file (WAV, MP3, FLAC, OGG)
-curl -X POST http://localhost:8000/v1/voices \
-  -F "name=Sarah Warm" \
-  -F "reference_audio=@sarah_sample.wav"
-
-# List all registered voices
-curl http://localhost:8000/v1/voices
-
-# Synthesize using a registered voice
 curl -X POST http://localhost:8000/tts \
   -H "Content-Type: application/json" \
   -d '{"text": "Hello!", "voice": "sarah-warm"}' \
   --output output.wav
+```
+
+### Clone a voice
+
+Register a new voice from a reference audio file:
+
+```bash
+curl -X POST http://localhost:8000/voices/clone \
+  -F "name=Sarah Warm" \
+  -F "reference_audio=@sarah_sample.wav"
+```
+
+### Blend voices
+
+Create a novel voice by blending two registered voices. Instead of cloning a single
+speaker (which raises legal concerns), blending interpolates the vocal characteristics
+of two sources to produce a third voice that never existed.
+
+A voice has two independent components:
+
+- **Voice texture** — the physical qualities of the vocal apparatus: pitch range,
+  formant structure, breathiness, nasality, warmth. Blended on a 0–100 scale.
+- **Voice rhythm** — the psychological delivery style: pacing, cadence, emphasis
+  patterns. Always taken from the first voice (`voice_a`). To use the other voice's
+  rhythm, swap the order.
+
+```bash
+# Blend: 70% James texture + 30% Sarah texture, with Sarah's rhythm
+curl -X POST http://localhost:8000/voices/blend \
+  -F "name=Sarah James 70" \
+  -F "voice_a=sarah" \
+  -F "voice_b=james" \
+  -F "texture_mix=70"
+```
+
+`texture_mix` controls the blend ratio: `0` = pure voice A, `100` = pure voice B.
+
+### Voice management
+
+```bash
+# List all registered voices
+curl http://localhost:8000/voices
 
 # Delete a voice
-curl -X DELETE http://localhost:8000/v1/voices/sarah-warm
+curl -X DELETE http://localhost:8000/voices/sarah-warm
 ```
 
 See [docs/api.md](docs/api.md) for all endpoints, parameters, and response formats.
@@ -166,18 +189,19 @@ The GPU tests require `HF_TOKEN` to be set in `.env` and a CUDA-capable GPU.
 
 ```
 app/
-  main.py               # FastAPI server (POST /tts, POST /tts/clone, /v1/voices)
-  models.py             # Pydantic/dataclass request models
+  main.py               # FastAPI server (POST /tts, /voices/clone, /voices/blend, etc.)
   voices.py             # VoiceStore — file-based voice reference storage
 tests/
   conftest.py           # Mocked model fixtures for unit tests
-  test_api.py           # API endpoint tests
-  test_voices.py        # Voice management endpoint tests
+  test_api.py           # TTS synthesis + response header tests
+  test_voices.py        # Voice clone, blend, list, delete endpoint tests
+  test_blend.py         # _blend_conditionals unit tests
   fixtures/             # Shared test data (ten_second_script.json, nimivoice.mp3)
   integration/
     conftest.py         # Real model fixtures for GPU tests
     artifacts/          # Generated WAV files saved here for review
-voices/                 # Registered voice references (gitignored)
+voices/
+  kronimi7030/           # Default shipped voice (70/30 kronii-nimi blend)
 .devcontainer/
   devcontainer.json     # GPU passthrough, port 8000, HF cache + voices volumes
   Dockerfile            # CUDA 12.8 + Python 3.11

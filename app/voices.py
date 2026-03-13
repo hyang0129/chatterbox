@@ -33,12 +33,6 @@ class VoiceMetadata(BaseModel):
     sample_rate: int
 
 
-class VoiceCreateResponse(BaseModel):
-    voice_id: str
-    name: str
-    created_at: datetime
-
-
 class VoiceListResponse(BaseModel):
     voices: list[VoiceMetadata]
 
@@ -144,7 +138,11 @@ class VoiceStore:
     """File-based voice reference storage.
 
     Each voice is stored as a directory ``<base_dir>/<voice_id>/`` containing
-    ``reference.wav`` and ``metadata.json``.
+    ``metadata.json`` and one of:
+
+    - ``reference.wav`` — raw reference audio (requires model extraction at runtime)
+    - ``conditionals.pt`` — pre-computed Conditionals (loaded directly,
+      skips extraction). Used for shipped/blended voices.
     """
 
     def __init__(self, base_dir: Path) -> None:
@@ -176,6 +174,13 @@ class VoiceStore:
         if voice_id not in self._index:
             raise KeyError(voice_id)
         return self._base_dir / voice_id / "reference.wav"
+
+    def get_conditionals_path(self, voice_id: str) -> Path | None:
+        """Return the path to pre-computed conditionals, or None if not available."""
+        if voice_id not in self._index:
+            raise KeyError(voice_id)
+        pt_path = self._base_dir / voice_id / "conditionals.pt"
+        return pt_path if pt_path.exists() else None
 
     def create_voice(
         self,
@@ -212,6 +217,42 @@ class VoiceStore:
 
         self._index[voice_id] = meta
         logger.info("Registered voice %r (id=%s, %.1fs)", name, voice_id, duration_s)
+        return meta
+
+    def create_blended_voice(
+        self,
+        name: str,
+        conditionals: object,
+        blend_config: dict,
+        sample_rate: int,
+    ) -> VoiceMetadata:
+        """Save a blended voice (pre-computed conditionals) to disk."""
+        voice_id = _slugify(name)
+        if voice_id in self._index:
+            raise FileExistsError(voice_id)
+
+        voice_dir = self._base_dir / voice_id
+        voice_dir.mkdir(parents=True, exist_ok=False)
+
+        # Save conditionals using the model's save method.
+        conditionals.save(str(voice_dir / "conditionals.pt"))
+
+        sources = f"{blend_config['voice_a']}+{blend_config['voice_b']}"
+        meta = VoiceMetadata(
+            voice_id=voice_id,
+            name=name,
+            original_filename=f"blend:{sources}",
+            created_at=datetime.now(timezone.utc),
+            duration_s=0.0,
+            sample_rate=sample_rate,
+        )
+        meta_path = voice_dir / "metadata.json"
+        raw = json.loads(meta.model_dump_json())
+        raw["blend_config"] = blend_config
+        meta_path.write_text(json.dumps(raw, indent=2))
+
+        self._index[voice_id] = meta
+        logger.info("Created blended voice %r (id=%s)", name, voice_id)
         return meta
 
     def delete_voice(self, voice_id: str) -> bool:
