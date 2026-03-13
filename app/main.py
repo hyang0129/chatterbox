@@ -107,7 +107,7 @@ def _generate_with_voice(
 ) -> torch.Tensor:
     """Generate speech, loading pre-computed conditionals when available."""
     if conditionals_path is not None:
-        model.conds = Conditionals.load(conditionals_path)
+        model.conds = Conditionals.load(conditionals_path, map_location=DEVICE)
         return model.generate(
             text,
             temperature=temperature,

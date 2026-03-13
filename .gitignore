@@ -11,3 +11,4 @@ build/
 voices/*
 !voices/kronimi7030/
 .env
+tests/integration/artifacts/
