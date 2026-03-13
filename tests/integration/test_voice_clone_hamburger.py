@@ -53,9 +53,6 @@ def _patch_norm_loudness():
 def real_model():
     if not torch.cuda.is_available():
         pytest.skip("No CUDA GPU available")
-    import os
-    if not os.getenv("HF_TOKEN"):
-        pytest.skip("HF_TOKEN not set")
     _patch_norm_loudness()
     from chatterbox.tts_turbo import ChatterboxTurboTTS
     return ChatterboxTurboTTS.from_pretrained(device="cuda")

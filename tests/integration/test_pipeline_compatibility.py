@@ -12,13 +12,18 @@ for side-by-side human review.
 Requires: NVIDIA GPU, HF_TOKEN in .env
 Run: pytest tests/integration/test_pipeline_compatibility.py -v -s
 """
+import asyncio
 import io
 import json
+import shutil
+import tempfile
 import wave
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+
+from tests.integration.conftest import make_voice_store_with_kronimi
 
 pytestmark = pytest.mark.gpu
 
@@ -41,11 +46,13 @@ def test_pipeline_scenes_synthesized(real_model, artifacts_dir: Path, pipeline_f
     - Saves one WAV per scene to artifacts/ for human review
     """
     from app.main import app
-    import asyncio
 
+    tmpdir = tempfile.mkdtemp(prefix="chatterbox_pipeline_test_")
     prev_model = getattr(app.state, "model", None)
+    prev_voice_store = getattr(app.state, "voice_store", None)
     prev_lock = getattr(app.state, "lock", None)
     app.state.model = real_model
+    app.state.voice_store = make_voice_store_with_kronimi(tmpdir)
     app.state.lock = asyncio.Lock()
 
     try:
@@ -91,8 +98,10 @@ def test_pipeline_scenes_synthesized(real_model, artifacts_dir: Path, pipeline_f
 
     finally:
         app.state.model = prev_model
+        app.state.voice_store = prev_voice_store
         if prev_lock is not None:
             app.state.lock = prev_lock
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     print(f"\n{'='*60}")
     print(f"Pipeline compatibility: {len(results)} scenes")

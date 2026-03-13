@@ -22,6 +22,8 @@ import json
 import os
 import sys
 import tempfile
+import wave
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -51,13 +53,45 @@ ARTIFACTS_DIR = Path(__file__).parent / "artifacts"
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 
 
+def make_voice_store_with_kronimi(voices_dir: str):
+    """Create a temp VoiceStore with a kronimi7030 reference-WAV entry.
+
+    Uses a reference WAV (not conditionals.pt) so the route takes the
+    audio_prompt_path code path — avoiding Conditionals.load, which in this
+    test process points to the mock stub imported by the unit-test conftest.
+    """
+    from app.voices import VoiceStore
+
+    voice_dir = os.path.join(voices_dir, "kronimi7030")
+    os.makedirs(voice_dir, exist_ok=True)
+
+    # Write a 6-second silent WAV (minimum accepted by VoiceStore validation).
+    sr = 24000
+    with wave.open(os.path.join(voice_dir, "reference.wav"), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(b"\x00\x00" * (sr * 6))
+
+    meta = {
+        "voice_id": "kronimi7030",
+        "name": "kronimi7030",
+        "original_filename": "reference.wav",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "duration_s": 6.0,
+        "sample_rate": sr,
+    }
+    with open(os.path.join(voice_dir, "metadata.json"), "w") as f:
+        json.dump(meta, f)
+
+    return VoiceStore(Path(voices_dir))
+
+
 @pytest.fixture(scope="session")
 def real_model():
     """Load ChatterboxTurboTTS once for the entire GPU test session."""
     if not torch.cuda.is_available():
         pytest.skip("NVIDIA GPU not available")
-    if not os.getenv("HF_TOKEN"):
-        pytest.skip("HF_TOKEN not set — run `huggingface-cli login` or export HF_TOKEN=<token>")
     from chatterbox.tts_turbo import ChatterboxTurboTTS
 
     try:

@@ -4,10 +4,12 @@ at the sys.modules level before app.main is ever imported. This prevents the lib
 numba-cache error that occurs in the dev container and removes any GPU requirement
 from the test suite.
 """
+import json
 import os
 import sys
 import tempfile
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 from unittest.mock import MagicMock
 
@@ -81,7 +83,7 @@ class _Conditionals:
         torch.save({"t3": self.t3, "gen": self.gen}, path)
 
     @staticmethod
-    def load(path, **kwargs):
+    def load(path, map_location=None):
         """Mock load that returns a stub Conditionals with valid tensors."""
         t3 = _T3Cond(
             speaker_emb=torch.randn(1, 256),
@@ -113,6 +115,33 @@ def mock_model() -> MagicMock:
     _mock_model_instance.generate.reset_mock()
     _mock_model_instance.generate.return_value = torch.zeros(1, MOCK_SR // 2)
     return _mock_model_instance
+
+
+def _create_precomputed_voice(voice_id: str, wpm: float | None = None) -> None:
+    """Create a voice directory with conditionals.pt (no reference WAV)."""
+    voice_dir = os.path.join(_voices_tmpdir, voice_id)
+    os.makedirs(voice_dir, exist_ok=True)
+    meta = {
+        "voice_id": voice_id,
+        "name": voice_id,
+        "original_filename": "blend",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "duration_s": 0.0,
+        "sample_rate": MOCK_SR,
+        "wpm": wpm,
+    }
+    with open(os.path.join(voice_dir, "metadata.json"), "w") as f:
+        json.dump(meta, f)
+    torch.save({"dummy": True}, os.path.join(voice_dir, "conditionals.pt"))
+    voice_store = getattr(app.state, "voice_store", None)
+    if voice_store is not None:
+        voice_store._scan()
+
+
+@pytest.fixture()
+def _kronimi_voice() -> None:
+    """Create the default kronimi7030 voice. Request this fixture in any test that POSTs to /tts."""
+    _create_precomputed_voice("kronimi7030")
 
 
 @pytest.fixture(autouse=True)

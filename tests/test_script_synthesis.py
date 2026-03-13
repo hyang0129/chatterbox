@@ -6,13 +6,10 @@ tests/artifacts/ for human review.
 """
 import io
 import json
-import os
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 import soundfile as sf
-import torch
 from fastapi.testclient import TestClient
 
 from tests.conftest import MOCK_SR
@@ -33,33 +30,13 @@ def script_request() -> dict:
         return json.load(f)
 
 
-def _create_precomputed_voice(voice_id: str) -> None:
-    """Create a voice directory with conditionals.pt (no reference WAV)."""
-    voices_dir = os.environ["CHATTERBOX_VOICES_DIR"]
-    voice_dir = os.path.join(voices_dir, voice_id)
-    os.makedirs(voice_dir, exist_ok=True)
-    meta = {
-        "voice_id": voice_id,
-        "name": voice_id,
-        "original_filename": "blend",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "duration_s": 0.0,
-        "sample_rate": 24000,
-    }
-    with open(os.path.join(voice_dir, "metadata.json"), "w") as f:
-        json.dump(meta, f)
-    torch.save({"dummy": True}, os.path.join(voice_dir, "conditionals.pt"))
-    from app.main import app as _app
-    _app.state.voice_store._scan()
-
-
 def test_synthesize_script(
     client: TestClient,
     mock_model,
     script_request: dict,
     artifacts_dir: Path,
+    _kronimi_voice,
 ) -> None:
-    _create_precomputed_voice("kronimi7030")
     response = client.post("/tts", json=script_request)
 
     assert response.status_code == 200

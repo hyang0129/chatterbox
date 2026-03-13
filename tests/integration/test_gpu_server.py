@@ -5,28 +5,38 @@ Injects the already-loaded real model into app.state (bypassing the lifespan
 model-load so we don't pay the cost twice) then hits POST /tts exactly as a
 real HTTP client would.
 """
+import asyncio
 import io
+import shutil
+import tempfile
 import wave
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.integration.conftest import make_voice_store_with_kronimi
+
 pytestmark = pytest.mark.gpu
 
 
-def test_gpu_server_render(real_model, script_request: dict, artifacts_dir: Path) -> None:
+def test_gpu_server_render(real_model, script_request: dict, artifacts_dir) -> None:
     from app.main import app
 
-    # Inject the pre-loaded real model; skip the lifespan by not using 'with'.
-    # Save and restore app.state to avoid polluting other tests.
+    tmpdir = tempfile.mkdtemp(prefix="chatterbox_gpu_test_")
     prev_model = getattr(app.state, "model", None)
+    prev_voice_store = getattr(app.state, "voice_store", None)
+    prev_lock = getattr(app.state, "lock", None)
     app.state.model = real_model
+    app.state.voice_store = make_voice_store_with_kronimi(tmpdir)
+    app.state.lock = asyncio.Lock()
     try:
         client = TestClient(app, raise_server_exceptions=True)
         response = client.post("/tts", json=script_request)
     finally:
         app.state.model = prev_model
+        app.state.voice_store = prev_voice_store
+        app.state.lock = prev_lock
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "audio/wav"

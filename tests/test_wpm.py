@@ -10,10 +10,7 @@ Coverage:
 - Calibration constants are sane
 """
 import io
-import json as json_mod
-import os
 import wave
-from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -21,7 +18,7 @@ import torch
 from fastapi.testclient import TestClient
 
 from app.voices import CALIBRATION_TEXT, CALIBRATION_WORD_COUNT
-from tests.conftest import _Conditionals, _T3Cond
+from tests.conftest import _Conditionals, _T3Cond, _create_precomputed_voice
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -63,26 +60,6 @@ def _make_fake_conditionals():
         "prompt_feat_len": None,
     }
     return _Conditionals(t3, gen)
-
-
-def _create_precomputed_voice(voice_id: str, wpm: float | None = None) -> None:
-    voices_dir = os.environ["CHATTERBOX_VOICES_DIR"]
-    voice_dir = os.path.join(voices_dir, voice_id)
-    os.makedirs(voice_dir, exist_ok=True)
-    meta = {
-        "voice_id": voice_id,
-        "name": voice_id,
-        "original_filename": "blend",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "duration_s": 0.0,
-        "sample_rate": 24000,
-        "wpm": wpm,
-    }
-    with open(os.path.join(voice_dir, "metadata.json"), "w") as f:
-        json_mod.dump(meta, f)
-    torch.save({"dummy": True}, os.path.join(voice_dir, "conditionals.pt"))
-    from app.main import app as _app
-    _app.state.voice_store._scan()
 
 
 # ---------------------------------------------------------------------------

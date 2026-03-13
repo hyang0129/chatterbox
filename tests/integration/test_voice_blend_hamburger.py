@@ -71,11 +71,8 @@ def _convert_mp3_to_wav(mp3_path: Path, tmp_dir: Path) -> Path:
 
 @pytest.fixture(scope="module")
 def real_model():
-    import os
     if not torch.cuda.is_available():
         pytest.skip("No CUDA GPU available")
-    if not os.getenv("HF_TOKEN"):
-        pytest.skip("HF_TOKEN not set")
     _patch_norm_loudness()
     from chatterbox.tts_turbo import ChatterboxTurboTTS
     return ChatterboxTurboTTS.from_pretrained(device="cuda")

@@ -6,15 +6,11 @@ Coverage:
 - POST /tts  — synthesis with default and registered voices, validation, tags
 """
 import io
-import json as json_mod
-import os
 import wave
-from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
 import soundfile as sf
-import torch
 from fastapi.testclient import TestClient
 
 # ---------------------------------------------------------------------------
@@ -51,29 +47,6 @@ def _create_voice(client: TestClient, name: str) -> dict:
     return r.json()
 
 
-def _create_precomputed_voice(voice_id: str) -> None:
-    """Create a voice directory with conditionals.pt (no reference WAV)."""
-    voices_dir = os.environ["CHATTERBOX_VOICES_DIR"]
-    voice_dir = os.path.join(voices_dir, voice_id)
-    os.makedirs(voice_dir, exist_ok=True)
-
-    meta = {
-        "voice_id": voice_id,
-        "name": voice_id,
-        "original_filename": "blend",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "duration_s": 0.0,
-        "sample_rate": 24000,
-    }
-    with open(os.path.join(voice_dir, "metadata.json"), "w") as f:
-        json_mod.dump(meta, f)
-
-    torch.save({"dummy": True}, os.path.join(voice_dir, "conditionals.pt"))
-
-    from app.main import app as _app
-    _app.state.voice_store._scan()
-
-
 # ---------------------------------------------------------------------------
 # /health
 # ---------------------------------------------------------------------------
@@ -97,12 +70,8 @@ class TestHealth:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("_kronimi_voice")
 class TestTTS:
-    @pytest.fixture(autouse=True)
-    def _ensure_default_voice(self, mock_model: MagicMock) -> None:
-        """Create the default voice (kronimi7030) with conditionals.pt."""
-        _create_precomputed_voice("kronimi7030")
-
     def test_basic_synthesis_200(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Hello, world!"})
         assert r.status_code == 200
@@ -256,11 +225,8 @@ class TestTTS:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("_kronimi_voice")
 class TestAudioResponseHeaders:
-    @pytest.fixture(autouse=True)
-    def _ensure_default_voice(self, mock_model: MagicMock) -> None:
-        _create_precomputed_voice("kronimi7030")
-
     def test_x_audio_duration_s_present(self, client: TestClient) -> None:
         r = client.post("/tts", json={"text": "Header check."})
         assert "x-audio-duration-s" in r.headers
