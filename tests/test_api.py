@@ -8,6 +8,8 @@ Coverage:
 """
 import io
 import os
+import subprocess
+import tempfile
 import wave
 from unittest.mock import MagicMock
 
@@ -256,6 +258,34 @@ class TestTTSClone:
             files={"reference_audio": ("ref.wav", _make_wav_bytes(), "audio/wav")},
         )
         assert r.status_code == 422
+
+    def test_clone_mp3_reference_200(self, client: TestClient, mock_model: MagicMock) -> None:
+        """MP3 reference audio should be auto-converted to WAV."""
+        wav_data = _make_wav_bytes()
+        with (
+            tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as src,
+            tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as dst,
+        ):
+            src.write(wav_data)
+            src_path, dst_path = src.name, dst.name
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", src_path, dst_path],
+                capture_output=True, check=True,
+            )
+            with open(dst_path, "rb") as f:
+                mp3_data = f.read()
+        finally:
+            os.unlink(src_path)
+            os.unlink(dst_path)
+
+        r = client.post(
+            "/tts/clone",
+            data={"text": "Hello from MP3 reference."},
+            files={"reference_audio": ("ref.mp3", mp3_data, "audio/mpeg")},
+        )
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "audio/wav"
 
     def test_clone_missing_audio_rejected(self, client: TestClient, mock_model: MagicMock) -> None:
         r = client.post("/tts/clone", data={"text": "No audio file."})

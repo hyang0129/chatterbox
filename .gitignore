@@ -8,4 +8,5 @@ build/
 *.mp3
 .ruff_cache/
 .devcontainer/.gituser.tmp
+voices/
 .env

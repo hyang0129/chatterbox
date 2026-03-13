@@ -9,8 +9,12 @@
     "--shm-size", "8g"
   ],
   "mounts": [
-    "source=chatterbox-hf-cache,target=/home/vscode/.cache/huggingface,type=volume"
+    "source=chatterbox-hf-cache,target=/home/vscode/.cache/huggingface,type=volume",
+    "source=chatterbox-voices,target=/home/vscode/.local/share/chatterbox/voices,type=volume"
   ],
+  "containerEnv": {
+    "CHATTERBOX_VOICES_DIR": "/home/vscode/.local/share/chatterbox/voices"
+  },
   "forwardPorts": [8000],
   "initializeCommand": ".devcontainer\\initialize.cmd",
   "postCreateCommand": ".devcontainer/post-create.sh",
