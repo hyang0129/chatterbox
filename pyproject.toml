@@ -32,7 +32,7 @@ select = ["E", "F", "I", "W"]
 [tool.pytest.ini_options]
 # Default run covers only mocked unit tests.
 # GPU integration tests live in integration/ and must be invoked explicitly:
-#   pytest integration/ -v -s
+#   pytest tests/integration/ -v -s
 testpaths = ["tests"]
 addopts = "-m 'not gpu'"
 markers = ["gpu: requires a CUDA-capable NVIDIA GPU"]

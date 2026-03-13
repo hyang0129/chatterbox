@@ -208,7 +208,7 @@ pytest
 pytest tests/integration/ -v -s
 ```
 
-The GPU tests require `HF_TOKEN` to be set in `.env` and a CUDA-capable GPU.
+The GPU tests require a CUDA-capable GPU. `HF_TOKEN` in `.env` is needed for the initial model download but the tests do not skip if it is absent.
 
 ## Project structure
 
