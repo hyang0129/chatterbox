@@ -166,6 +166,41 @@ eliminate the need for a second tool invocation on the client side.
 
 ---
 
+### FEAT-7 — Estimate and expose per-voice WPM at clone time
+
+**Severity:** Medium — clients that plan scene timing (e.g. video-agent) assume a fixed WPM for all voices, causing systematic over/under-run when TTS duration diverges from the script's estimate.
+
+**Problem:**
+Different cloned voices speak at different rates. A slow, deliberate voice might produce 120 WPM while an energetic voice hits 180 WPM. Clients currently guess a single WPM constant (e.g. 150) for all voices, so a 20-word `vo_line` budgeted for 8 seconds might actually take 10 seconds from a slow voice — or 6.5 from a fast one. This compounds across scenes, causing the final video to overshoot or undershoot its target duration.
+
+**Required changes:**
+
+1. **At clone/register time** (`POST /v1/voices`): after saving the reference audio, synthesize a standard calibration passage (~50-100 words of known length) using the new voice. Measure the output duration and compute `wpm = word_count / (duration_s / 60)`.
+
+2. **Store the WPM estimate** in the voice metadata (alongside the existing reference audio path, voice ID, etc.).
+
+3. **Expose WPM in the API:**
+   - `GET /v1/voices` — include `wpm` field per voice entry.
+   - `GET /v1/voices/{voice_id}` — include `wpm` in the detail response.
+   - (Optional) Include `X-Voice-WPM` response header on `/tts` responses.
+
+4. **Calibration text:** Use a phonetically diverse, neutral passage (no unusual words or punctuation that might cause TTS artifacts). Store it as a constant so results are comparable across voices.
+
+**Example response:**
+```json
+{
+  "voice_id": "kronimi7030",
+  "name": "Kronimi",
+  "wpm": 142.5,
+  "sample_rate": 24000,
+  "created_at": "2026-03-10T12:00:00Z"
+}
+```
+
+**Client usage:** video-agent's script planner can fetch the voice's WPM before generating scene timings, replacing its hardcoded estimate with the actual measured rate for the selected voice.
+
+---
+
 ### FEAT-6 — Document the native output sample rate (`model.sr`) in the API reference and README
 
 **Severity:** Low — callers piping audio into tools that assume a different rate will get pitch/speed errors without warning.
@@ -197,6 +232,7 @@ The following sequence is logically constrained by dependencies and risk:
 | 3 | **FEAT-5** | Depends on BUG-1 (async endpoint must exist to add headers cleanly). Adds zero-cost metadata to the response. |
 | 4 | **FEAT-6** | Depends on FEAT-5 (health endpoint already touched; `/health` and `docs/api.md` updated in the same pass). Mostly documentation. |
 | 5 | **BUG-3** | Documentation-only. Done last since the thread-safety constraint is already captured in the issue doc and integration plan. Low risk of regression. |
+| 6 | **FEAT-7** | Depends on voice registration (Stage 1.3). Requires synthesizing a calibration passage per voice, so BUG-1 (async/lock) should be done first to avoid GPU race during calibration. |
 
 ### Detailed issue docs
 
@@ -208,6 +244,7 @@ Each issue has a dedicated design doc under `docs/issues/`:
 - [`docs/issues/FEAT-4-tts-request-dataclass.md`](issues/FEAT-4-tts-request-dataclass.md)
 - [`docs/issues/FEAT-5-response-headers.md`](issues/FEAT-5-response-headers.md)
 - [`docs/issues/FEAT-6-sample-rate-docs.md`](issues/FEAT-6-sample-rate-docs.md)
+- [`docs/issues/FEAT-7-per-voice-wpm.md`](issues/FEAT-7-per-voice-wpm.md)
 
 Each doc contains: problem description, implementation plan with code, and a testing plan
 with fixture texts drawn from the video-agent WW2 tanks script (`tests/fixtures/ww2_tanks_segments.json`).
