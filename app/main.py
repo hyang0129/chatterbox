@@ -32,6 +32,36 @@ VOICES_DIR = os.environ.get("CHATTERBOX_VOICES_DIR", "./voices")
 DEFAULT_VOICE = "kronimi7030"
 
 
+def _calibrate_uncalibrated_voices(
+    model: ChatterboxTurboTTS, voice_store: VoiceStore
+) -> None:
+    """Calibrate WPM for any registered voices that lack it (e.g. pre-shipped voices)."""
+    for meta in voice_store.list_voices():
+        if meta.wpm is not None:
+            continue
+        cond_path = voice_store.get_conditionals_path(meta.voice_id)
+        if cond_path is not None:
+            audio_prompt_path = None
+            conditionals_path = str(cond_path)
+        else:
+            ref_path = voice_store.get_reference_path(meta.voice_id)
+            if not ref_path.exists():
+                logger.warning("No audio for voice %s, skipping WPM calibration", meta.voice_id)
+                continue
+            audio_prompt_path = str(ref_path)
+            conditionals_path = None
+        try:
+            wpm = _calibrate_wpm(
+                model,
+                audio_prompt_path=audio_prompt_path,
+                conditionals_path=conditionals_path,
+            )
+            voice_store.update_wpm(meta.voice_id, wpm)
+            logger.info("Calibrated WPM for voice %s: %.1f", meta.voice_id, wpm)
+        except Exception:
+            logger.warning("WPM calibration failed for voice %s", meta.voice_id, exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Loading ChatterboxTurboTTS on %s...", DEVICE)
@@ -42,6 +72,8 @@ async def lifespan(app: FastAPI):
         "Model ready. %d registered voice(s).",
         len(app.state.voice_store.list_voices()),
     )
+    # Calibrate WPM for any voices that don't have it yet (e.g. pre-shipped voices).
+    _calibrate_uncalibrated_voices(app.state.model, app.state.voice_store)
     yield
 
 
