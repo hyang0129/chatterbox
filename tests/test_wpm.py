@@ -178,6 +178,45 @@ class TestVoiceWPMEndpoints:
 
 
 # ---------------------------------------------------------------------------
+# Startup calibration for pre-shipped voices
+# ---------------------------------------------------------------------------
+
+
+class TestStartupCalibration:
+    def test_calibrate_uncalibrated_voices(
+        self, client: TestClient, mock_model: MagicMock
+    ) -> None:
+        """_calibrate_uncalibrated_voices fills in WPM for voices that lack it."""
+        from app.main import _calibrate_uncalibrated_voices, app as _app
+
+        _create_precomputed_voice("uncal-voice", wpm=None)
+        voice_store = _app.state.voice_store
+        assert voice_store.get_voice("uncal-voice").wpm is None
+
+        _calibrate_uncalibrated_voices(mock_model, voice_store)
+
+        meta = voice_store.get_voice("uncal-voice")
+        assert meta.wpm is not None
+        assert meta.wpm > 0
+
+    def test_calibrate_skips_already_calibrated(
+        self, client: TestClient, mock_model: MagicMock
+    ) -> None:
+        """Voices with existing WPM are not re-calibrated."""
+        from app.main import _calibrate_uncalibrated_voices, app as _app
+
+        _create_precomputed_voice("cal-voice", wpm=142.5)
+        voice_store = _app.state.voice_store
+
+        mock_model.generate.reset_mock()
+        _calibrate_uncalibrated_voices(mock_model, voice_store)
+
+        # generate should not have been called for the already-calibrated voice
+        assert not mock_model.generate.called
+        assert voice_store.get_voice("cal-voice").wpm == 142.5
+
+
+# ---------------------------------------------------------------------------
 # X-Voice-WPM header on /tts
 # ---------------------------------------------------------------------------
 
